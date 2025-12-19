@@ -99,7 +99,11 @@ export function handleAlovaError(error: any, method: Method) {
     globalToast.error(error.message || '请求失败')
   }
   else {
-    globalToast.error('发生意外错误')
+    globalToast.error('登录已过期，请重新登录！');
+    const timer = setTimeout(() => {
+      clearTimeout(timer)
+      router.replaceAll({ name: 'login' })
+    }, 1500)
   }
 
   throw error

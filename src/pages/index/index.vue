@@ -1,6 +1,17 @@
 <script lang="ts" setup>
 import { onMounted, ref, watch } from 'vue'
 
+definePage({
+  name: 'home',
+  layout: 'tabbar',
+  style: {
+    navigationBarTitleText: '首页',
+    navigationStyle: 'custom',
+  },
+})
+
+const router = useRouter()
+const user = useAuthStore()
 const toast = useToast()
 const statusBarHeight = ref(0) // 获取状态栏高度
 const safeAreaInsetsBottom = ref(0) // 底部安全区域高度
@@ -11,7 +22,12 @@ const loading = ref(false)
 const hasMore = ref(true) // 假设初始有更多内容
 const page = ref(1)
 const pageSize = 10 // 每次获取的图片数量
-const isLoggedIn = ref(false) // 模拟登录状态
+
+const { send: getUserInfo } = useRequest(() => Apis.lsky.profile({
+  headers: {
+    Authorization: `Bearer ${user.token}`,
+  },
+}))
 
 onMounted(() => {
   uni.getSystemInfo({
@@ -20,16 +36,15 @@ onMounted(() => {
       safeAreaInsetsBottom.value = res.safeAreaInsets?.bottom || 0 // 获取底部安全区域高度
     },
   })
-  fetchImages(categoryId.value, true) // 初始加载第一个 Tab 的图片
-})
-
-definePage({
-  name: 'home',
-  layout: 'tabbar',
-  style: {
-    navigationBarTitleText: '首页',
-    navigationStyle: 'custom',
-  },
+  if (user.isLoggedIn) {
+    getUserInfo({}).then((res) => {
+      if (res.status) {
+        user.user = res.data
+      } else {
+        toast.error(res.message || '获取用户信息失败')
+      }
+    })
+  }
 })
 
 const category = ref([
@@ -38,53 +53,38 @@ const category = ref([
     id: 0,
   },
   {
-    name: '推荐',
+    name: '个性化',
     id: 1,
   },
   {
-    name: '科技',
+    name: '推荐',
     id: 2,
-  },
-  {
-    name: '二次元',
-    id: 3,
   },
 ])
 
 function changeCategory (event: { index: number, name: string}) {
   categoryId.value = event.index
-  console.log(event)
-  fetchImages(categoryId.value, true) // 切换 Tab 时重新获取图片
 }
 
-// 模拟获取图片
-function fetchImages(catId: number, reset: boolean = false) {
-  if (loading.value && !reset) return // 防止重复加载
-  loading.value = true
-
-  if (reset) {
-    leftColumnImages.value = []
-    rightColumnImages.value = []
-    page.value = 1
-    hasMore.value = true
-  }
-
+function getMockImages(catId: number) {
   // 模拟 API 请求延迟
   setTimeout(() => {
     let newImages: any[] = []
     if (catId === 0) { // 第一个 Tab: 始终显示默认 10 张图片
       for (let i = 0; i < pageSize; i++) {
-        newImages.push({ id: `img-${catId}-${page.value}-${i}`, url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` }) // 随机高度模拟瀑布流
+        newImages.push({ key: `img-${catId}-${page.value}-${i}`,
+          links: { url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` } }) // 随机高度模拟瀑布流
       }
       hasMore.value = false // 第一个 Tab 初始加载后不再加载更多
     } else { // 其他 Tab
-      if (!isLoggedIn.value) {
+      if (!user.isLoggedIn) {
         newImages = [] // 未登录时不显示图片
         hasMore.value = false
       } else {
         // 已登录时模拟获取更多图片
         for (let i = 0; i < pageSize; i++) {
-          newImages.push({ id: `img-${catId}-${page.value}-${i}`, url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` }) // 随机高度模拟瀑布流
+          newImages.push({ key: `img-${catId}-${page.value}-${i}`,
+            links: { url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` } }) // 随机高度模拟瀑布流
         }
         hasMore.value = page.value < 3 // 模拟有更多页
       }
@@ -104,21 +104,86 @@ function fetchImages(catId: number, reset: boolean = false) {
   }, 2000)
 }
 
+const { send: getImages } = useRequest((currentPage: number, currentCategoryId: number) => Apis.lsky.getImages({
+  params: {
+    page: currentPage,
+    order: 'newest',
+    permission: currentCategoryId === 0 ? 'public' : 'private',
+  },
+  headers: {
+    'Authorization': `Bearer ${user.token}`,
+  },
+}), {
+  immediate: false,
+})
+
+// 获取图片
+async function fetchImages(catId: number, reset: boolean = false) {
+  if (loading.value && !reset) return // 防止重复加载
+  loading.value = true
+
+  if (reset) {
+    leftColumnImages.value = []
+    rightColumnImages.value = []
+    page.value = 1
+    hasMore.value = true
+  }
+  if (!user.isLoggedIn) {
+    getMockImages(catId)
+  } else {
+    const res = await getImages(page.value, categoryId.value)
+    if (res.status) {
+      res.data.data.forEach((img: {
+        key: string;
+        name: string;
+        origin_name: string;
+        pathname: string;
+        size: number;
+        width: number;
+        height: number;
+        md5: string;
+        sha1: string;
+        human_date: string;
+        date: number;
+        links: {
+          url: string;
+          html: string;
+          bbcode: string;
+          markdown: string;
+          markdown_with_link: string;
+          thumbnail_url: string;
+        }
+      }, index: number) => {
+        if (index % 2 === 0) {
+          leftColumnImages.value.push(img)
+        } else {
+          rightColumnImages.value.push(img)
+        }
+      })
+      page.value++ // 递增页码
+      // Assuming res.data.data contains pagination info like current_page and last_page
+      hasMore.value = res.data.data.current_page < res.data.data.last_page // 根据 API 响应更新是否有更多数据
+    } else {
+      toast.error(res.message)
+      hasMore.value = false // 如果请求失败，则没有更多内容
+    }
+    loading.value = false // 无论成功或失败，请求完成后都将 loading 设置为 false
+  }
+}
+
 function handleLogin() {
-  isLoggedIn.value = !isLoggedIn.value // 切换登录状态
-  toast.success(isLoggedIn.value ? '登录成功' : '已登出')
-  fetchImages(categoryId.value, true) // 登录/登出后重新获取当前 Tab 的图片
+  router.push({ name: 'login' })
 }
 
 // 监听 categoryId 变化以重置并获取图片
 watch(categoryId, (newCatId: number) => {
   fetchImages(newCatId, true)
-})
+}, { immediate: true }) // 添加 immediate: true，确保在组件挂载时立即执行一次
 
 // 加载更多图片 (用于无限滚动)
-function loadMore() {
-  if (hasMore.value && !loading.value && categoryId.value !== 0 && isLoggedIn.value) {
-    fetchImages(categoryId.value)
+async function loadMore() {
+  if (hasMore.value && !loading.value && categoryId.value !== 0 && user.isLoggedIn) {
+    await fetchImages(categoryId.value)
   }
 }
 </script>
@@ -132,38 +197,38 @@ function loadMore() {
         inactive-color="#999"
         line-height="0"
         @change="changeCategory"
-        class="flex-1"
         :sticky="true"
         :offset-top="statusBarHeight"
+        custom-class="tabs"
       >
         <block v-for="item in category" :key="item.id">
           <wd-tab :title="item.name">
             <scroll-view
-              class="flex items-center justify-center"
               @scrolltolower="loadMore"
-              v-if="(item.id === 0) || (item.id !== 0 && isLoggedIn)"
+              v-if="(item.id === 0) || (item.id !== 0 && user.isLoggedIn)"
             >
               <view v-if="loading" class="h-[85vh] flex items-center justify-center"><wd-loading size="50px" /></view>
               <view v-else class="flex gap-2 p-2">
                 <view class="flex flex-1 flex-col gap-2">
-                  <view v-for="img in leftColumnImages" :key="img.id">
-                    <wd-img :src="img.url" mode="widthFix" class="w-full" radius="10" :enable-preview="true" :show-menu-by-longpress="true" custom-class="wd-img-block" />
+                  <view v-for="img in leftColumnImages" :key="img.key">
+                    <wd-img :src="img.links.url" mode="widthFix" class="w-full" radius="10" :enable-preview="true" :show-menu-by-longpress="true" custom-class="wd-img-block" />
                   </view>
                 </view>
                 <view class="flex flex-1 flex-col gap-2">
-                  <view v-for="img in rightColumnImages" :key="img.id">
-                    <wd-img :src="img.url" mode="widthFix" class="w-full" radius="10" :enable-preview="true" :show-menu-by-longpress="true" custom-class="wd-img-block" />
+                  <view v-for="img in rightColumnImages" :key="img.key">
+                    <wd-img :src="img.links.url" mode="widthFix" class="w-full" radius="10" :enable-preview="true" :show-menu-by-longpress="true" custom-class="wd-img-block" />
                   </view>
                 </view>
               </view>
             </scroll-view>
+            
           </wd-tab>
         </block>
       </wd-tabs>
     </view>
     <!-- 未登录底部模糊提示栏 -->
     <view
-      v-if="!isLoggedIn"
+      v-if="!user.isLoggedIn"
       :style="{ bottom: `${50 + safeAreaInsetsBottom}px` }"
       class="fixed left-0 right-0 h-30 flex flex-col items-center justify-center gap-4 rounded-md bg-white/80 py-4 text-gray-600 backdrop-blur-sm"
     >
@@ -174,6 +239,21 @@ function loadMore() {
 </template>
 
 <style lang="scss">
+  .tabs {
+    .wd-tabs__nav-container {
+      padding-left: 75rpx;
+      justify-content: flex-start;
+      gap: 70rpx;
+      font-size: 26rpx;
+    }
+    .wd-tabs__nav-item {
+      flex: none !important;
+
+      &.is-active {
+        font-size: 34rpx;
+      }
+    }
+  }
   // 覆盖默认渲染的样式防止图片不显示
   .wd-img-block {
     display: block !important;
