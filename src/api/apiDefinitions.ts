@@ -47,4 +47,5 @@ export default {
   'lsky.profile': ['GET', '/profile'],
   'lsky.logout': ['DELETE', '/tokens'],
   'lsky.getImages': ['GET', '/images'],
+  'lsky.albums': ['GET', '/albums'],
 };

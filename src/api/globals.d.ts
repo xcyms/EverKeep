@@ -1071,7 +1071,7 @@ declare global {
       }>(
         config?: Config
       ): Alova2Method<{
-        status: number;
+        status: boolean;
         message: string;
         data: {
           name: string;
@@ -1110,7 +1110,7 @@ declare global {
       >(
         config: Config
       ): Alova2Method<{
-        status: number;
+        status: boolean;
         message: string;
         data: {
           current_page: number;
@@ -1140,6 +1140,35 @@ declare global {
           }];
         };
       }, 'lsky.getImages', Config>;
+      albums<Config extends Alova2MethodConfig<Album[]> & {
+          params?: {
+            page?: number;
+            order?: 'newest' | 'earliest' | 'most' | 'least';
+            keyword?: string;
+          };
+          headers?: {
+            Authorization: string;
+            Accept?: 'application/json';
+          };
+        }
+      >(
+        config: Config
+      ): Alova2Method<{
+        status: boolean;
+        message: string;
+        data: {
+          current_page: number;
+          last_page: number;
+          per_page: number;
+          total: number;
+          data: Album[{
+            id: number;
+            name: string;
+            intro: string;
+            image_num: number;
+          }];
+        };
+      }, 'lsky.albums', Config>;
     };
   }
 
