@@ -88,6 +88,17 @@
     // #endif
     // #ifdef MP-WEIXIN
     {
+      "path": "pages/me/about",
+      "type": "page",
+      "name": "about",
+      "style": {
+        "navigationBarTitleText": "关于系统",
+        "navigationStyle": "custom"
+      }
+    },
+    // #endif
+    // #ifdef MP-WEIXIN
+    {
       "path": "pages/search/images",
       "type": "page",
       "name": "images",

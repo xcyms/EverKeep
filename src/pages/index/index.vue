@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { onMounted, ref, watch } from 'vue'
+import ImageWaterfall from '@/components/ImageWaterfall.vue'
 
 definePage({
   name: 'home',
@@ -27,12 +28,11 @@ const orderOptions = [
   { name: '最小尺寸', value: 'least', subname: '按文件大小从小到大' },
 ]
 
-const leftColumnImages = ref<any[]>([]) // 存储左列图片数据
-const rightColumnImages = ref<any[]>([]) // 存储右列图片数据
+const allImages = ref<any[]>([]) // 存储所有图片数据
 const loading = ref(false)
-const hasMore = ref(true) // 假设初始有更多内容
+const hasMore = ref(true)
 const page = ref(1)
-const pageSize = 6 // 每次获取的图片数量
+const pageSize = 16 // 每次获取的图片数量
 
 const category = ref([
   {
@@ -59,36 +59,32 @@ function getMockImages(catId: number) {
     let newImages: any[] = []
     if (catId === 0) { // 第一个 Tab: 始终显示默认 10 张图片
       for (let i = 0; i < pageSize; i++) {
-        newImages.push({ key: `img-${catId}-${page.value}-${i}`,
-          links: { url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` } }) // 随机高度模拟瀑布流
+        newImages.push({
+          key: `img-${catId}-${page.value}-${i}`,
+          links: { url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` }
+        })
       }
       hasMore.value = false // 第一个 Tab 初始加载后不再加载更多
-    } else { // 其他 Tab
+    } else {
+      // 其他 Tab
       if (!user.isLoggedIn) {
         newImages = [] // 未登录时不显示图片
         hasMore.value = false
       } else {
-        // 已登录时模拟获取更多图片
         for (let i = 0; i < pageSize; i++) {
-          newImages.push({ key: `img-${catId}-${page.value}-${i}`,
-            links: { url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` } }) // 随机高度模拟瀑布流
+          newImages.push({
+            key: `img-${catId}-${page.value}-${i}`,
+            links: { url: `https://picsum.photos/id/${Math.floor(Math.random() * 100)}/200/${Math.floor(Math.random() * 100) + 200}` }
+          })
         }
-        hasMore.value = page.value < 3 // 模拟有更多页
+        hasMore.value = page.value < 3
       }
     }
 
-    // 将图片分配到两列
-    newImages.forEach((img, index) => {
-      if (index % 2 === 0) {
-        leftColumnImages.value.push(img)
-      } else {
-        rightColumnImages.value.push(img)
-      }
-    })
-
+    allImages.value.push(...newImages)
     page.value++
     loading.value = false
-  }, 2000)
+  }, 1000)
 }
 
 const { send: getImages } = useRequest((currentPage: number, currentCategoryId: number, currentOrder: 'newest' | 'earliest' | 'utmost' | 'least') => Apis.lsky.getImages({
@@ -106,55 +102,35 @@ const { send: getImages } = useRequest((currentPage: number, currentCategoryId: 
 
 // 获取图片
 async function fetchImages(catId: number, reset: boolean = false) {
-  if (loading.value && !reset) return // 防止重复加载
+  if (loading.value && !reset) return
   loading.value = true
 
   if (reset) {
-    leftColumnImages.value = []
-    rightColumnImages.value = []
+    allImages.value = []
     page.value = 1
     hasMore.value = true
   }
+
   if (!user.isLoggedIn) {
     getMockImages(catId)
   } else {
-    const res = await getImages(page.value, categoryId.value, order.value)
-    if (res.status) {
-      res.data.data.forEach((img: {
-        key: string;
-        name: string;
-        origin_name: string;
-        pathname: string;
-        size: number;
-        width: number;
-        height: number;
-        md5: string;
-        sha1: string;
-        human_date: string;
-        date: number;
-        links: {
-          url: string;
-          html: string;
-          bbcode: string;
-          markdown: string;
-          markdown_with_link: string;
-          thumbnail_url: string;
-        }
-      }, index: number) => {
-        if (index % 2 === 0) {
-          leftColumnImages.value.push(img)
-        } else {
-          rightColumnImages.value.push(img)
-        }
-      })
-      page.value++ // 递增页码
-      // Assuming res.data.data contains pagination info like current_page and last_page
-      hasMore.value = res.data.data.current_page < res.data.data.last_page // 根据 API 响应更新是否有更多数据
-    } else {
-      toast.error(res.message)
-      hasMore.value = false // 如果请求失败，则没有更多内容
+    try {
+      const res = await getImages(page.value, categoryId.value, order.value)
+      if (res.status) {
+        const newData = res.data.data || []
+        allImages.value.push(...newData)
+        page.value++
+        hasMore.value = res.data.current_page < res.data.last_page
+      } else {
+        toast.error(res.message)
+        hasMore.value = false
+      }
+    } catch (error) {
+      console.error('Fetch images error:', error)
+      hasMore.value = false
+    } finally {
+      loading.value = false
     }
-    loading.value = false // 无论成功或失败，请求完成后都将 loading 设置为 false
   }
 }
 
@@ -187,17 +163,13 @@ watch(() => user.isLoggedIn, (newVal, oldVal) => {
 
 // 加载更多图片 (用于无限滚动)
 async function loadMore() {
-  if (hasMore.value && !loading.value && categoryId.value !== 0 && user.isLoggedIn) {
+  if (hasMore.value && !loading.value) {
+    if (!user.isLoggedIn && categoryId.value === 0) {
+      // 未登录时仅在第一个分类展示模拟数据，不触发加载更多
+      return
+    }
     await fetchImages(categoryId.value)
   }
-}
-
-// 预览图片
-function previewImage(url: string) {
-  uni.previewImage({
-    urls: [url],
-    current: url
-  })
 }
 
 onMounted(() => {
@@ -205,7 +177,6 @@ onMounted(() => {
     success: (res) => {
       statusBarHeight.value = res.statusBarHeight || 0
       safeAreaInsetsBottom.value = res.safeAreaInsets?.bottom || 0 // 获取底部安全区域高度
-      // 适配小程序胶囊按钮
       // #ifdef MP-WEIXIN
       const menuButton = uni.getMenuButtonBoundingClientRect()
       if (menuButton) {
@@ -220,7 +191,6 @@ onMounted(() => {
 onReachBottom(() => {
   loadMore()
 })
-
 </script>
 
 <template>
@@ -258,40 +228,7 @@ onReachBottom(() => {
 
     <!-- 内容区域 - 使用原生页面滚动 -->
     <div class="px-3 pt-3">
-      <div class="flex flex-row items-start gap-3">
-        <!-- 左列 -->
-        <div class="flex flex-1 flex-col gap-3">
-          <div
-            v-for="img in leftColumnImages"
-            :key="img.key"
-            class="overflow-hidden rounded-xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] transition-opacity active:opacity-90"
-          >
-            <image
-              :src="img.links.url"
-              mode="widthFix"
-              class="fade-in block w-full"
-              lazy-load
-              @tap="previewImage(img.links.url)"
-            />
-          </div>
-        </div>
-        <!-- 右列 -->
-        <div class="flex flex-1 flex-col gap-3">
-          <div
-            v-for="img in rightColumnImages"
-            :key="img.key"
-            class="overflow-hidden rounded-xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] transition-opacity active:opacity-90"
-          >
-            <image
-              :src="img.links.url"
-              mode="widthFix"
-              class="fade-in block w-full"
-              lazy-load
-              @tap="previewImage(img.links.url)"
-            />
-          </div>
-        </div>
-      </div>
+      <ImageWaterfall :list="allImages" :loading="loading" />
 
       <!-- 加载状态 -->
       <wd-loadmore
@@ -390,15 +327,6 @@ onReachBottom(() => {
 </template>
 
 <style lang="scss" scoped>
-.fade-in {
-  animation: fadeIn 0.3s ease-in;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 :deep(.tabs),
 :deep(.wd-tabs__nav) {
   background-color: transparent !important;

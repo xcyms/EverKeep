@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { onReachBottom, onShow } from '@dcloudio/uni-app'
-import { onMounted, ref, watch } from 'vue'
+import { onPageScroll, onReachBottom, onShow } from '@dcloudio/uni-app'
+import { computed, onMounted, ref, watch } from 'vue'
 
 definePage({
   name: 'search',
@@ -19,13 +19,18 @@ const statusBarHeight = ref(0) // 获取状态栏高度
 const menuButtonRight = ref(0) // 胶囊按钮右侧距离
 const searchQuery = ref('') // 搜索关键字
 const albumList = ref<any[]>([]) // 相册列表数据
+const isFirstLoad = ref(true) // 是否是首次加载
+const showBackTop = ref(false) // 是否显示回到顶部
 const loading = ref(false) // 加载状态
 const loadingState = ref<'loading' | 'finished' | 'error'>('finished');
 const hasMore = ref(true) // 是否有更多数据
 const page = ref(1) // 当前页码
-const pageSize = ref(6) // 每页数量
 const order = ref<'newest' | 'earliest' | 'most' | 'least'>('newest') // 排序方式
 const showSortSheet = ref(false) // 是否显示排序面板
+
+// 将列表拆分为左右两列，解决 columns-2 布局在加载时的抖动问题
+const leftColList = computed(() => albumList.value.filter((_, i) => i % 2 === 0))
+const rightColList = computed(() => albumList.value.filter((_, i) => i % 2 !== 0))
 
 const orderOptions = [
   { name: '最新创建', value: 'newest', subname: '按相册创建时间从新到旧' },
@@ -68,6 +73,19 @@ watch(order, () => {
   handleSearch()
 })
 
+// 监听滚动（用于回到顶部）
+onPageScroll((e) => {
+  showBackTop.value = e.scrollTop > 400
+})
+
+// 回到顶部
+function scrollToTop() {
+  uni.pageScrollTo({
+    scrollTop: 0,
+    duration: 300
+  })
+}
+
 // 监听登录状态，动态更新数据
 watch(() => user.isLoggedIn, (newVal, oldVal) => {
   console.log('Login status changed:', { oldVal, newVal })
@@ -101,15 +119,19 @@ async function fetchAlbums(isLoadMore = false) {
   console.log('fetchAlbums called', { isLoggedIn: user.isLoggedIn, isLoadMore, page: page.value });
 
   if (!user.isLoggedIn) {
+    // ... 未登录逻辑保持不变
     if (!isLoadMore) {
-      albumList.value = defaultAlbums.map(item => ({
-        ...item,
-        _error: false,
-      }));
+      albumList.value = defaultAlbums.map(item => ({ ...item, _error: false }));
       hasMore.value = false;
       loadingState.value = 'finished';
+      isFirstLoad.value = false;
     }
     return;
+  }
+
+  // 只有在非加载更多且列表为空时才显示骨架屏
+  if (!isLoadMore && albumList.value.length === 0) {
+    isFirstLoad.value = true;
   }
 
   loading.value = true;
@@ -117,7 +139,6 @@ async function fetchAlbums(isLoadMore = false) {
 
   try {
     const res = await searchAlbums(searchQuery.value, page.value, order.value);
-    console.log('searchAlbums response:', res);
 
     if (res.status) {
       const newData = (res.data.data || []).map((item: any) => ({
@@ -130,20 +151,27 @@ async function fetchAlbums(isLoadMore = false) {
         albumList.value.push(...newData);
       } else {
         albumList.value = newData;
+        // 【优化】成功获取第一页数据后，存入本地缓存
+        if (page.value === 1 && searchQuery.value === '') {
+          uni.setStorage({
+            key: 'cache_search_albums',
+            data: newData
+          });
+        }
       }
       hasMore.value = res.data.last_page > res.data.current_page;
       loadingState.value = 'finished';
-      pageSize.value = res.data.per_page || 6;
     } else {
       toast.error(res.message || '加载相册失败');
       loadingState.value = 'error';
     }
   } catch (error) {
-    console.error('Error fetching albums:', error);
-    toast.error('请求相册数据失败');
+    // ... 错误处理保持不变
+    toast.error(error || '加载相册失败');
     loadingState.value = 'error';
   } finally {
     loading.value = false;
+    isFirstLoad.value = false; // 关闭骨架屏
   }
 }
 
@@ -189,7 +217,14 @@ onMounted(async () => {
     },
   });
 
-  // 初始加载：增加微小延迟，确保 Pinia 状态已从本地缓存完全恢复
+  // 初始加载：尝试读取缓存
+  const cached = uni.getStorageSync('cache_search_albums');
+  if (cached && cached.length > 0) {
+    albumList.value = cached;
+    isFirstLoad.value = false; // 如果有缓存，直接关闭骨架屏显示内容
+  }
+
+  // 增加微小延迟，确保 Pinia 状态已从本地缓存完全恢复
   setTimeout(() => {
     fetchAlbums();
   }, 100);
@@ -206,7 +241,7 @@ onReachBottom(() => {
   <div class="bg-[#f8f9fa] pb-10">
     <!-- 沉浸式搜索头部 - 使用 fixed 确保不随页面滚动 -->
     <div
-      class="fixed left-0 right-0 top-0 z-50 bg-white/80 px-3 pb-2 backdrop-blur-xl transition-all"
+      class="fixed left-0 right-0 top-0 z-50 bg-white/80 px-3 pb-2 backdrop-blur-xl"
       :style="{ paddingTop: `${statusBarHeight + 6}px` }"
     >
       <div class="flex items-center" :style="{ paddingRight: `${menuButtonRight}px` }">
@@ -232,39 +267,81 @@ onReachBottom(() => {
 
     <!-- 内容区域 - 使用原生页面滚动 -->
     <div class="flex flex-col px-4 pt-2">
+      <!-- 骨架屏状态 -->
+      <div v-if="isFirstLoad && albumList.length === 0" class="flex gap-4 px-1">
+        <div v-for="col in 2" :key="col" class="flex flex-1 flex-col">
+          <div v-for="i in 3" :key="i" class="mb-4 overflow-hidden rounded-2xl bg-white p-0 shadow-sm">
+            <div class="animate-pulse bg-gray-200" :style="{ height: i % 2 === 0 ? '180px' : '220px' }" />
+            <div class="p-3 space-y-2">
+              <div class="h-4 w-3/4 animate-pulse rounded bg-gray-200" />
+              <div class="h-3 w-1/2 animate-pulse rounded bg-gray-100" />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 结果统计 -->
       <div v-if="albumList.length > 0" class="mb-4 flex items-center justify-between px-1">
         <span class="text-base text-gray-900 font-bold italic">Discovery</span>
         <span class="text-[11px] text-gray-400 font-medium tracking-wider">{{ albumList.length }} ALBUMS</span>
       </div>
 
-      <!-- 瀑布流布局容器 -->
-      <div v-if="albumList.length > 0" class="columns-2 gap-4 px-1">
-        <div
-          v-for="(album) in albumList"
-          :key="album.id"
-          class="group relative mb-4 flex flex-col break-inside-avoid overflow-hidden rounded-2xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] transition-all active:opacity-80"
-          @click="goImages(album.id)"
-        >
-          <!-- 封面图容器 - 高度完全自适应 -->
-          <div class="relative w-full bg-gray-100">
-            <image
-              :src="album.cover"
-              mode="widthFix"
-              class="block w-full transition-transform duration-500 group-active:scale-105"
-              lazy-load
-              @error="handleImageError(album)"
-            />
-            <!-- 数量标签 -->
-            <div class="absolute right-2.5 top-2.5 z-10 rounded-full bg-black/30 px-2 py-0.5 text-[10px] text-white font-bold backdrop-blur-md">
-              {{ album.image_num }}
+      <!-- 瀑布流布局容器 - 使用 Flex 改写以提升稳定性 -->
+      <div v-if="albumList.length > 0" class="flex gap-4 px-1">
+        <!-- 左列 -->
+        <div class="flex flex-1 flex-col">
+          <div
+            v-for="album in leftColList"
+            :key="album.id"
+            class="group relative mb-4 flex flex-col overflow-hidden rounded-2xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] active:opacity-80"
+            @tap="goImages(album.id)"
+          >
+            <div class="relative w-full overflow-hidden bg-gray-100">
+              <image
+                :src="album.cover"
+                mode="widthFix"
+                class="block h-auto w-full"
+                lazy-load
+                @error="handleImageError(album)"
+              />
+              <div class="absolute right-2.5 top-2.5 z-10 rounded-full bg-black/30 px-2 py-0.5 text-[10px] text-white font-bold backdrop-blur-md">
+                {{ album.image_num }}
+              </div>
+            </div>
+            <div class="p-3">
+              <div class="text-sm text-gray-800 font-bold leading-snug">{{ album.name }}</div>
+              <div v-if="album.intro" class="mt-1.5 text-[11px] text-gray-400 leading-relaxed">
+                {{ album.intro }}
+              </div>
             </div>
           </div>
-          <!-- 信息区 - 紧贴图片下方，高度随内容变化 -->
-          <div class="p-3">
-            <div class="text-sm text-gray-800 font-bold leading-snug">{{ album.name }}</div>
-            <div v-if="album.intro" class="mt-1.5 text-[11px] text-gray-400 leading-relaxed">
-              {{ album.intro }}
+        </div>
+
+        <!-- 右列 -->
+        <div class="flex flex-1 flex-col">
+          <div
+            v-for="album in rightColList"
+            :key="album.id"
+            class="group relative mb-4 flex flex-col overflow-hidden rounded-2xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] active:opacity-80"
+            @tap="goImages(album.id)"
+          >
+            <div class="relative w-full overflow-hidden bg-gray-100">
+              <image
+                :src="album.cover"
+                mode="widthFix"
+                class="block h-auto w-full"
+                lazy-load
+                @error="handleImageError(album)"
+              />
+              <div class="absolute right-2.5 top-2.5 z-10 rounded-full bg-black/30 px-2 py-0.5 text-[10px] text-white font-bold backdrop-blur-md">
+                {{ album.image_num }}
+              </div>
+            </div>
+            <div class="p-3">
+              <div class="text-sm text-gray-800 font-bold leading-snug">{{ album.name }}</div>
+              <div v-if="album.intro" class="mt-1.5 text-[11px] text-gray-400 leading-relaxed">
+                {{ album.intro }}
+              </div>
             </div>
           </div>
         </div>
@@ -281,6 +358,19 @@ onReachBottom(() => {
       <!-- 底部状态与适配 -->
       <div class="mt-auto">
         <wd-loadmore custom-class="py-8" :state="loadingState" />
+      </div>
+    </div>
+
+    <!-- 悬浮功能按钮 -->
+    <div
+      class="fixed bottom-24 right-6 z-50 flex flex-col gap-4 transition-all duration-300"
+      :class="[showBackTop ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0']"
+    >
+      <div
+        class="h-12 w-12 flex items-center justify-center rounded-full bg-white/90 shadow-lg backdrop-blur-md transition-transform active:scale-90"
+        @click="scrollToTop"
+      >
+        <wd-icon name="arrow-up" size="20px" color="#333" />
       </div>
     </div>
     <!-- 排序操作面板 - 底部弹出美化版 -->

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onLoad, onReachBottom } from '@dcloudio/uni-app'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import ImageWaterfall from '@/components/ImageWaterfall.vue'
 
 definePage({
   name: 'images',
@@ -32,8 +33,7 @@ const orderOptions = [
   { name: '最小尺寸', value: 'least', subname: '按文件大小从小到大' },
 ]
 
-const leftColumnImages = ref<any[]>([])
-const rightColumnImages = ref<any[]>([])
+const images = ref<any[]>([])
 
 // 获取图片接口
 const { send: getImages } = useRequest((currentPage: number, id: number, keyword: string, currentOrder: 'newest' | 'earliest' | 'utmost' | 'least') => Apis.lsky.getImages({
@@ -56,8 +56,7 @@ async function fetchImages(reset = false) {
   loading.value = true
 
   if (reset) {
-    leftColumnImages.value = []
-    rightColumnImages.value = []
+    images.value = []
     page.value = 1
     hasMore.value = true
   }
@@ -66,13 +65,7 @@ async function fetchImages(reset = false) {
     const res = await getImages(page.value, albumId.value!, searchQuery.value, order.value)
     if (res.status) {
       const newData = res.data.data || []
-      newData.forEach((img: any, index: number) => {
-        if (index % 2 === 0) {
-          leftColumnImages.value.push(img)
-        } else {
-          rightColumnImages.value.push(img)
-        }
-      })
+      images.value.push(...newData)
 
       page.value++
       hasMore.value = res.data.current_page < res.data.last_page
@@ -102,15 +95,6 @@ function handleSortSelect(item: any) {
 watch(order, () => {
   fetchImages(true)
 })
-
-// 预览图片
-function previewImage(url: string) {
-  const allImages = [...leftColumnImages.value, ...rightColumnImages.value].map(img => img.links.url)
-  uni.previewImage({
-    urls: allImages,
-    current: url,
-  })
-}
 
 // 处理上传
 function handleUpload() {
@@ -241,48 +225,7 @@ onReachBottom(() => {
 
     <!-- 内容区域 -->
     <div class="px-3 pt-3">
-      <div v-if="leftColumnImages.length > 0 || rightColumnImages.length > 0" class="flex flex-row items-start gap-3">
-        <!-- 左列 -->
-        <div class="flex flex-1 flex-col gap-3">
-          <div
-            v-for="img in leftColumnImages"
-            :key="img.key"
-            class="overflow-hidden rounded-xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] transition-all active:scale-[0.98] active:opacity-90"
-            @tap="previewImage(img.links.url)"
-          >
-            <image
-              :src="img.links.url"
-              mode="widthFix"
-              class="fade-in block w-full"
-              lazy-load
-            />
-          </div>
-        </div>
-        <!-- 右列 -->
-        <div class="flex flex-1 flex-col gap-3">
-          <div
-            v-for="img in rightColumnImages"
-            :key="img.key"
-            class="overflow-hidden rounded-xl bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)] transition-all active:scale-[0.98] active:opacity-90"
-            @tap="previewImage(img.links.url)"
-          >
-            <image
-              :src="img.links.url"
-              mode="widthFix"
-              class="fade-in block w-full"
-              lazy-load
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- 空状态 -->
-      <div v-else-if="!loading" class="flex flex-col items-center justify-center pt-32">
-        <div class="mb-4 h-20 w-20 flex items-center justify-center rounded-full bg-gray-100">
-          <wd-icon name="picture" size="32px" color="#cbd5e1" />
-        </div>
-        <span class="text-sm text-gray-400 font-medium">相册内暂无图片</span>
-      </div>
+      <ImageWaterfall :list="images" :loading="loading" />
 
       <!-- 加载状态 -->
       <wd-loadmore
@@ -380,14 +323,3 @@ onReachBottom(() => {
     </wd-popup>
   </div>
 </template>
-
-<style lang="scss" scoped>
-.fade-in {
-  animation: fadeIn 0.4s ease-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-</style>
