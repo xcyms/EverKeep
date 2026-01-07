@@ -23,6 +23,13 @@ mConsole
 - 📊 **可视化看板**：直观的存储空间统计，实时掌握数据动态。
 - 🛠️ **现代技术栈**：UnoCSS 原子化 CSS、Pinia 状态管理、Alova 极致高效请求。
 
+## 📱 演示体验
+
+<p align="left">
+  <img src="./mp-weixin.jpg" width="200" />
+  <br />
+</p>
+
 ## 🛠️ 技术栈
 
 - **框架**: [uni-app](https://uniapp.dcloud.net.cn/) (Vue 3 Composition API)
