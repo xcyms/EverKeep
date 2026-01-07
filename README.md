@@ -34,7 +34,8 @@ mConsole
 
 - **框架**: [uni-app](https://uniapp.dcloud.net.cn/) (Vue 3 Composition API)
 - **构建工具**: [Vite](https://vitejs.dev/)
-- **UI 组件库**: [Wot Design Uni](https://wot-ui.chineseseo.org.cn/)
+- **脚手架**: [wot-starter](https://github.com/wot-ui/wot-starter/)
+- **UI 组件库**: [Wot Design Uni](https://wot-ui.cn/)
 - **样式引擎**: [UnoCSS](https://unocss.dev/)
 - **状态管理**: [Pinia](https://pinia.vuejs.org/)
 - **请求工具**: [Alova](https://alova.js.org/)
